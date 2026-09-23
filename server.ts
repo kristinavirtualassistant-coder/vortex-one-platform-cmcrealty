@@ -37,6 +37,7 @@ import { upsertCanonicalLead } from './server/services/crmService';
 import { listTasks, createTask, updateTaskResult, createApproval, listWorkflows, getWorkflow, upsertWorkflow, updateWorkflow, deleteWorkflow, listApprovals, decideApproval } from './server/services/agentOperationsService';
 import { queueEmailOutreach } from './server/services/emailOutreachService';
 import { enqueueJob, JOB_TYPES } from './server/services/jobService';
+import { createWorkflowRun, updateWorkflowRun, getWorkflowRun, listWorkflowRuns, abortWorkflowRun } from './server/services/workflowRunService';
 // Email worker runs through the managed worker entrypoint in server/workers/emailWorker.ts.
 import { callbackUrl, completeOAuthCallback, createOAuthStart, type OAuthProvider } from './server/services/integrationOAuth';
 
@@ -378,25 +379,66 @@ async function startServer() {
     } catch (err: any) { console.error('Workflow delete error:', err); res.status(503).json({ error: 'Workflow state unavailable' }); }
   });
 
-  // Workflow run read/mutation APIs were intentionally retired until durable PostgreSQL workflow-run persistence is available.
-  app.get('/api/runs', (_req, res) => {
-    res.status(410).json({ error: 'Workflow run read API was removed; use the PostgreSQL workflow execution stream.' });
+  // Durable PostgreSQL workflow-run APIs.
+  app.get('/api/runs', async (req, res) => {
+    try {
+      const orgId = requireOrganizationId((req as AuthRequest).dbUser?.organization_id);
+      const runs = await listWorkflowRuns(orgId, {
+        workflowId: typeof req.query.workflow_id === 'string' ? req.query.workflow_id : undefined,
+        status: typeof req.query.status === 'string' ? req.query.status as WorkflowRun['status'] : undefined,
+        limit: typeof req.query.limit === 'string' ? Number(req.query.limit) : 20,
+      });
+      res.json(runs);
+    } catch (err: any) {
+      console.error('Workflow run list error:', err);
+      res.status(503).json({ error: 'Workflow run state unavailable' });
+    }
   });
 
-  app.get('/api/runs/latest', (_req, res) => {
-    res.status(410).json({ error: 'Workflow run read API was removed; use the PostgreSQL workflow execution stream.' });
+  app.get('/api/runs/latest', async (req, res) => {
+    try {
+      const orgId = requireOrganizationId((req as AuthRequest).dbUser?.organization_id);
+      const runs = await listWorkflowRuns(orgId, { limit: 1 });
+      res.json(runs[0] || null);
+    } catch (err: any) {
+      console.error('Latest workflow run error:', err);
+      res.status(503).json({ error: 'Workflow run state unavailable' });
+    }
   });
 
-  app.get('/api/runs/active', (_req, res) => {
-    res.status(410).json({ error: 'Workflow run read API was removed; use the PostgreSQL workflow execution stream.' });
+  app.get('/api/runs/active', async (req, res) => {
+    try {
+      const orgId = requireOrganizationId((req as AuthRequest).dbUser?.organization_id);
+      const runs = await listWorkflowRuns(orgId, { limit: 100 });
+      res.json(runs.filter((run) => run.status === 'running' || run.status === 'paused_approval' || run.status === 'queued'));
+    } catch (err: any) {
+      console.error('Active workflow runs error:', err);
+      res.status(503).json({ error: 'Workflow run state unavailable' });
+    }
   });
 
-  app.get('/api/runs/:id', (_req, res) => {
-    res.status(410).json({ error: 'Workflow run read API was removed; use the PostgreSQL workflow execution stream.' });
+  app.get('/api/runs/:id', async (req, res) => {
+    try {
+      const orgId = requireOrganizationId((req as AuthRequest).dbUser?.organization_id);
+      const run = await getWorkflowRun(orgId, req.params.id);
+      if (!run) return res.status(404).json({ error: 'Workflow run not found' });
+      res.json(run);
+    } catch (err: any) {
+      console.error('Workflow run read error:', err);
+      res.status(503).json({ error: 'Workflow run state unavailable' });
+    }
   });
 
-  app.post('/api/runs/:id/abort', (_req, res) => {
-    res.status(410).json({ error: 'Workflow run mutation API was removed; durable workflow-run persistence is required.' });
+  app.post('/api/runs/:id/abort', requireRole(['admin', 'executive', 'manager']), async (req, res) => {
+    try {
+      const orgId = requireOrganizationId((req as AuthRequest).dbUser?.organization_id);
+      const run = await abortWorkflowRun(orgId, req.params.id);
+      if (!run) return res.status(404).json({ error: 'Active workflow run not found' });
+      res.json(run);
+    } catch (err: any) {
+      console.error('Workflow run abort error:', err);
+      res.status(503).json({ error: 'Workflow run state unavailable' });
+    }
   });
 
   // Execute Custom Workflow Chain Step-by-Step
@@ -426,7 +468,7 @@ async function startServer() {
         workflow_id: workflow_id || 'custom_chain',
         name: matchedWf?.name || `Custom Execution (${stepsToRun.length} steps)`,
         status: 'running',
-        initiated_by: 'Visual Workflow Builder',
+        initiated_by: (req as AuthRequest).dbUser?.id || 'system',
         created_at: new Date().toISOString(),
         total_steps: stepsToRun.length,
         completed_steps: 0,
@@ -441,6 +483,20 @@ async function startServer() {
             status: 'idle',
           };
         }
+      });
+      await createWorkflowRun({
+        organizationId: orgId,
+        runId,
+        workflowId: workflow_id,
+        name: workflowRun.name,
+        initiatedBy: workflowRun.initiated_by,
+        totalSteps: stepsToRun.length,
+        status: 'running',
+      });
+      await updateWorkflowRun(orgId, runId, {
+        node_states: workflowRun.node_states,
+        tasks: workflowRun.tasks,
+        step_outputs: workflowRun.step_outputs,
       });
 
       const runStartTime = Date.now();
@@ -461,6 +517,14 @@ async function startServer() {
             startedAt: new Date().toISOString(),
           };
         }
+        await updateWorkflowRun(orgId, runId, {
+          current_step_id: workflowRun.current_step_id,
+          current_step_name: workflowRun.current_step_name,
+          current_agent_id: workflowRun.current_agent_id,
+          node_states: workflowRun.node_states,
+          tasks: workflowRun.tasks,
+          completed_steps: workflowRun.completed_steps,
+        });
 
         // Construct task with inherited context from previous steps or initial parameters
         const task: Task = {
@@ -516,6 +580,13 @@ async function startServer() {
               completedAt: task.completed_at,
             };
           }
+          await updateWorkflowRun(orgId, runId, {
+            status: 'running',
+            completed_steps: workflowRun.completed_steps,
+            tasks: workflowRun.tasks,
+            node_states: workflowRun.node_states,
+            step_outputs: workflowRun.step_outputs,
+          });
 
           // If step requires human approval or is marked as approval gate, register approval
           if (step.requiresApproval || step.type === 'HUMAN_APPROVAL' || subAgentRes.requiresApproval) {
@@ -577,6 +648,12 @@ async function startServer() {
             };
           }
           workflowRun.status = 'failed';
+          await updateWorkflowRun(orgId, runId, {
+            status: 'failed',
+            tasks: workflowRun.tasks,
+            node_states: workflowRun.node_states,
+            completed_steps: workflowRun.completed_steps,
+          });
 
           // Persist failure audit entry in PostgreSQL
           await pool.query(
@@ -613,6 +690,16 @@ async function startServer() {
       workflowRun.completed_at = new Date().toISOString();
       workflowRun.execution_time_ms = Date.now() - runStartTime;
       workflowRun.final_summary = `Completed ${workflowRun.completed_steps}/${stepsToRun.length} steps in ${workflowRun.execution_time_ms}ms`;
+      await updateWorkflowRun(orgId, runId, {
+        status: workflowRun.status,
+        completed_steps: workflowRun.completed_steps,
+        tasks: workflowRun.tasks,
+        node_states: workflowRun.node_states,
+        step_outputs: workflowRun.step_outputs,
+        final_summary: workflowRun.final_summary,
+        execution_time_ms: workflowRun.execution_time_ms,
+        completed_at: workflowRun.completed_at,
+      });
 
       res.json({
         run_id: runId,
