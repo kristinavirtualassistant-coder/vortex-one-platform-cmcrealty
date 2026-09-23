@@ -49,8 +49,8 @@ let currentDbStatus: DatabaseStatus = {
   type: 'in_memory',
   instance: 'in_memory',
   database: process.env.DB_NAME || 'vortex-one-database',
-  appliedMigrationsCount: 14,
-  lastMigrationName: '014_create_integration_connections',
+  appliedMigrationsCount: 15,
+  lastMigrationName: '015_create_durable_workflow_runs',
 };
 
 export function getDatabaseConnectionConfig(env: NodeJS.ProcessEnv = process.env): DatabaseConnectionConfig | null {
