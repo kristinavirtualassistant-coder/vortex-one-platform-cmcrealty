@@ -317,7 +317,8 @@ export const MIGRATIONS: Migration[] = [
         error TEXT,
         execution_time_ms INTEGER,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
-        completed_at TIMESTAMP WITH TIME ZONE
+        completed_at TIMESTAMP WITH TIME ZONE,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
       );
 
       CREATE INDEX IF NOT EXISTS idx_tasks_org_status ON tasks(organization_id, status);
