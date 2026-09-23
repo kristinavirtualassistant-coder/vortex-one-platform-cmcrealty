@@ -73,7 +73,8 @@ async function runAllTests() {
       INSERT INTO organizations (id, name, slug)
       VALUES
         ('org_cmc_realty', 'CMC Realty Test Organization', 'cmc-realty-test'),
-        ('org_test', 'Vortex One Integration Test Organization', 'vortex-one-integration-test')
+        ('org_test', 'Vortex One Integration Test Organization', 'vortex-one-integration-test'),
+        ('org_tenant_b', 'Vortex One Tenant B Integration Test Organization', 'vortex-one-tenant-b-test')
       ON CONFLICT (id) DO NOTHING
     `);
     await pgPool.query(`
