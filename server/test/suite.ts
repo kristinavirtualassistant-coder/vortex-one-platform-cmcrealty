@@ -282,6 +282,7 @@ async function runAllTests() {
       campaignId: newCamp.id,
     });
     // Auto-check should catch (949) 555-9999 or dial regular contact
+    console.log('  Dialer CI result:', JSON.stringify({ status: dialBlocked.status, contactId: dialBlocked.contact?.id, phone: dialBlocked.contact?.phone_number, suppressionReason: dialBlocked.suppressionReason }));
     assert(['dialed', 'suppressed'].includes(dialBlocked.status), 'Dialer successfully processed contact with compliance check');
 
     await CampaignManager.pauseCampaign('org_cmc_realty', newCamp.id);
