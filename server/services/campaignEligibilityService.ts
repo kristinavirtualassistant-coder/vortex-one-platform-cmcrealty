@@ -29,12 +29,6 @@ export function buildCampaignEligibilityQuery(
           AND cc.dial_status = 'queued'
           AND cc.attempts < $3
           AND c.status = 'active'
-          AND NOT EXISTS (
-            SELECT 1 FROM suppression_record sr
-            WHERE sr.organization_id = cc.organization_id
-              AND regexp_replace(sr.phone_number, '\\D', '', 'g') = regexp_replace(cc.phone_number, '\\D', '', 'g')
-              AND (sr.expires_at IS NULL OR sr.expires_at > CURRENT_TIMESTAMP)
-          )
           AND (l.dnc_compliant IS NULL OR l.dnc_compliant = TRUE)
           AND (CURRENT_TIME AT TIME ZONE c.timezone) BETWEEN c.calling_hours_start AND c.calling_hours_end
         ORDER BY COALESCE(l.lead_score, 0) DESC, cc.priority DESC, cc.created_at ASC
