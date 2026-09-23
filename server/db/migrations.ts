@@ -561,4 +561,37 @@ export const MIGRATIONS: Migration[] = [
         ON integration_oauth_states(expires_at);
     `,
   },
+  {
+    version: 15,
+    name: '015_create_durable_workflow_runs',
+    sql: `
+      CREATE TABLE IF NOT EXISTS workflow_runs (
+        run_id VARCHAR(64) PRIMARY KEY,
+        organization_id VARCHAR(64) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        workflow_id VARCHAR(64) REFERENCES workflows(id) ON DELETE SET NULL,
+        name VARCHAR(255) NOT NULL,
+        status VARCHAR(30) NOT NULL CHECK (status IN ('queued','running','completed','failed','paused_approval')),
+        current_step_id VARCHAR(255),
+        current_step_name VARCHAR(255),
+        current_agent_id VARCHAR(64),
+        total_steps INTEGER DEFAULT 0 NOT NULL,
+        completed_steps INTEGER DEFAULT 0 NOT NULL,
+        tasks JSONB DEFAULT '[]'::jsonb NOT NULL,
+        initiated_by VARCHAR(64) NOT NULL,
+        node_states JSONB DEFAULT '{}'::jsonb NOT NULL,
+        step_outputs JSONB DEFAULT '{}'::jsonb NOT NULL,
+        qa_verification JSONB,
+        final_summary TEXT,
+        execution_time_ms INTEGER,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        completed_at TIMESTAMP WITH TIME ZONE
+      );
+      CREATE INDEX IF NOT EXISTS idx_workflow_runs_org_created
+        ON workflow_runs(organization_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_workflow_runs_org_status
+        ON workflow_runs(organization_id, status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_workflow_runs_org_workflow
+        ON workflow_runs(organization_id, workflow_id, created_at DESC);
+    `,
+  },
 ];
