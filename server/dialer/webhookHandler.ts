@@ -1,0 +1,192 @@
+import { requireOrganizationId } from '../services/organizationContext';
+import { timingSafeEqual } from 'node:crypto';
+/**
+ * Vortex One - Telephony Webhook Ingestion & Idempotency Pipeline
+ * Normalizes RingCentral, Twilio, and SIP event streams into authoritative PostgreSQL tables
+ */
+
+import { getPgPool } from '../db/db';
+import { getTelephonyAdapter } from './telephonyAdapter';
+import { SuppressionService } from './suppressionService';
+import { NormalizedCallEvent, TelephonyProvider } from './types';
+import { DialerStateTransitionService } from './dialerStateTransitionService';
+import { eventTypeForState } from './callStateMachine';
+import { publishDialerEvent } from './realtime';
+
+export interface WebhookProcessResult {
+  status: 'processed' | 'duplicate_ignored' | 'error';
+  eventId: string;
+  telephonyCallId: string;
+  eventType: string;
+  normalizedEvent?: NormalizedCallEvent;
+  error?: string;
+}
+
+export function getHeader(headers: Record<string, any> = {}, name: string): string | null {
+  const value = headers[name] ?? headers[name.toLowerCase()] ?? headers[name.replace(/(^|-)([a-z])/g, (_, p, c) => p + c.toUpperCase())];
+  return value == null ? null : String(value).trim();
+}
+
+function secureTokenEqual(supplied: string, configured: string): boolean {
+  const a = Buffer.from(supplied);
+  const b = Buffer.from(configured);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+export function getProviderEventId(rawPayload: any): string | null {
+  const eventId = rawPayload?.uuid || rawPayload?.eventId;
+  return typeof eventId === 'string' && eventId.trim() ? eventId.trim() : null;
+}
+
+export function verifyRingCentralWebhook(headers: Record<string, any> = {}): boolean {
+  const configured = process.env.RINGCENTRAL_WEBHOOK_VALIDATION_TOKEN?.trim();
+  const supplied = getHeader(headers, 'validation-token');
+  if (!configured || !supplied) return false;
+  return secureTokenEqual(supplied, configured);
+}
+
+export function handleRingCentralValidation(headers: Record<string, any> = {}): {
+  statusCode: number;
+  headers: Record<string, string>;
+  body: string;
+} | null {
+  const supplied = getHeader(headers, 'validation-token');
+  if (!supplied || !verifyRingCentralWebhook(headers)) return null;
+  return {
+    statusCode: 200,
+    headers: { 'Content-Type': 'application/json', 'Validation-Token': supplied },
+    body: '',
+  };
+}
+
+// Retained for backward-compatible tests/older internal callers. Production RingCentral
+// callbacks use RingCentral's Validation-Token mechanism above.
+export function verifyWebhookSecret(headers: Record<string, any> = {}): boolean {
+  const configured = process.env.RINGCENTRAL_WEBHOOK_SECRET?.trim();
+  if (!configured) return process.env.NODE_ENV === 'test';
+  const supplied = getHeader(headers, 'x-vortex-webhook-secret');
+  return !!supplied && secureTokenEqual(supplied, configured);
+}
+
+export class WebhookHandler {
+  private static requireTenant(organizationId: string): string {
+    return requireOrganizationId(organizationId);
+  }
+  /**
+   * Ingest and normalize an incoming telephony provider webhook
+   */
+  public static async processWebhook(
+    provider: TelephonyProvider = 'ringcentral',
+    organizationId: string,
+    rawPayload: any,
+    headers?: Record<string, any>
+  ): Promise<WebhookProcessResult> {
+    try {
+      const adapter = getTelephonyAdapter(provider);
+      const normalized = adapter.normalizeWebhookPayload(rawPayload, headers);
+      if (!normalized.eventId) throw new Error('Provider webhook event identity is required');
+      if (!normalized.telephonyCallId) throw new Error('Provider webhook telephony call identity is required');
+
+      const pool = getPgPool();
+      if (!pool) {
+        throw new Error('PostgreSQL is required for authoritative webhook processing');
+      }
+
+      // PostgreSQL is authoritative for production call state. The durable transition
+      // service locks the call, validates the provider-neutral FSM transition, writes the
+      // event, and updates the call in one transaction. Duplicate provider events are
+      // harmless because call_event.id is the durable idempotency key.
+      let authoritativeCallId: string | null = null;
+      if (pool) {
+        const body = rawPayload?.body || rawPayload;
+        const party = body?.parties?.[0] || {};
+        const partyPhones = [party?.to?.phoneNumber, party?.from?.phoneNumber].filter(Boolean);
+        const callLookup = await pool.query(
+          `SELECT id FROM call
+           WHERE organization_id = $1
+             AND (telephony_session_id = $2 OR telephony_call_id = $2
+                  OR (regexp_replace(phone_number, '\\D', '', 'g') = ANY($3::text[])
+                      AND status IN ('initiated','ringing','connected','in-progress')
+                      AND created_at >= CURRENT_TIMESTAMP - INTERVAL '10 minutes'))
+           ORDER BY CASE WHEN telephony_session_id = $2 THEN 0 WHEN telephony_call_id = $2 THEN 1 ELSE 2 END, created_at DESC
+           LIMIT 1`,
+          [organizationId, normalized.telephonyCallId, partyPhones.map((n: string) => n.replace(/\D/g, ''))],
+        );
+        if (!callLookup.rowCount) throw new Error(`Call not found for organization: ${normalized.telephonyCallId}`);
+        authoritativeCallId = callLookup.rows[0].id;
+
+        const transition = await DialerStateTransitionService.transition(pool, {
+          organizationId,
+          callId: callLookup.rows[0].id,
+          eventId: normalized.eventId,
+          eventType: normalized.dialerEventType || eventTypeForState(normalized.dialerState || DialerStateTransitionService.normalizeProviderStatus(normalized.status)),
+          nextState: normalized.dialerState || DialerStateTransitionService.normalizeProviderStatus(normalized.status),
+          payload: normalized.rawPayload,
+          occurredAt: normalized.timestamp,
+          disposition: normalized.disposition,
+          durationSeconds: normalized.durationSeconds,
+          recordingUrl: normalized.recordingUrl,
+          telephonySessionId: normalized.telephonySessionId || normalized.telephonyCallId,
+          ringcentralPartyId: normalized.ringcentralPartyId,
+        });
+
+        if (transition.status === 'duplicate_ignored') {
+          return {
+            status: 'duplicate_ignored',
+            eventId: normalized.eventId,
+            telephonyCallId: normalized.telephonyCallId,
+            eventType: normalized.eventType,
+          };
+        }
+
+        publishDialerEvent({
+          organizationId, callId: callLookup.rows[0].id,
+          type: normalized.dialerEventType || normalized.eventType,
+          payload: { ...normalized.rawPayload, normalizedStatus: normalized.status, telephonySessionId: normalized.telephonySessionId, partyId: normalized.ringcentralPartyId },
+          occurredAt: normalized.timestamp,
+        });
+
+        await pool.query(
+          `INSERT INTO processed_events (event_id, organization_id, provider, event_type, processed_at)
+           VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+           ON CONFLICT (event_id) DO NOTHING`,
+          [normalized.eventId, organizationId, provider, normalized.eventType],
+        );
+      }
+
+      // PostgreSQL remains the sole source of truth after the durable transition.
+      const { rows: updatedCalls } = await pool.query(
+        'SELECT phone_number FROM call WHERE id = $1 AND organization_id = $2 LIMIT 1',
+        [authoritativeCallId, organizationId],
+      );
+      const updatedCall = updatedCalls[0];
+
+      // Step 4: If disposition is Do-Not-Call, auto-register suppression
+      if (normalized.disposition === 'do_not_call' && updatedCall?.phone_number) {
+        await SuppressionService.addSuppression(
+          organizationId,
+          updatedCall.phone_number,
+          'Contact verbally requested Do-Not-Call on live call',
+          `webhook_${provider}`
+        );
+      }
+
+      return {
+        status: 'processed',
+        eventId: normalized.eventId,
+        telephonyCallId: normalized.telephonyCallId,
+        eventType: normalized.eventType,
+        normalizedEvent: normalized,
+      };
+    } catch (err: any) {
+      console.error('WebhookHandler processing error:', err);
+      return {
+        status: 'error',
+        eventId: rawPayload?.eventId || 'unknown',
+        telephonyCallId: rawPayload?.telephonyCallId || 'unknown',
+        eventType: rawPayload?.eventType || 'unknown',
+        error: err.message,
+      };
+    }
+  }
+}
