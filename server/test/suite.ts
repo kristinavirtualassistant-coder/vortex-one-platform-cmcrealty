@@ -276,14 +276,21 @@ async function runAllTests() {
       { contactName: 'DNC Blocked Prospect', phoneNumber: '(949) 555-9999', priority: 3 },
     ]);
 
-    // Run dialer step for contact 1 (DNC blocked prospect)
+    // First dequeue the highest-priority DNC contact and verify it is suppressed.
     const dialBlocked = await CampaignManager.dialNextContact({
       organizationId: 'org_cmc_realty',
       campaignId: newCamp.id,
     });
-    // Auto-check should catch (949) 555-9999 or dial regular contact
-    console.log('  Dialer CI result:', JSON.stringify({ status: dialBlocked.status, contactId: dialBlocked.contact?.id, phone: dialBlocked.contact?.phone_number, suppressionReason: dialBlocked.suppressionReason }));
-    assert(['dialed', 'suppressed'].includes(dialBlocked.status), 'Dialer successfully processed contact with compliance check');
+    console.log('  Dialer CI DNC result:', JSON.stringify({ status: dialBlocked.status, phone: dialBlocked.contact?.phone_number, suppressionReason: dialBlocked.suppressionReason }));
+    assert(dialBlocked.status === 'suppressed', 'Dialer blocks a suppressed contact');
+
+    // Then dequeue the eligible contact and verify it enters the dial path.
+    const dialAllowed = await CampaignManager.dialNextContact({
+      organizationId: 'org_cmc_realty',
+      campaignId: newCamp.id,
+    });
+    console.log('  Dialer CI eligible result:', JSON.stringify({ status: dialAllowed.status, phone: dialAllowed.contact?.phone_number }));
+    assert(dialAllowed.status === 'dialed', 'Dialer successfully processes an eligible contact');
 
     await CampaignManager.pauseCampaign('org_cmc_realty', newCamp.id);
     const pausedCampaign = await getPgPool()!.query('SELECT status FROM campaign WHERE id = $1 AND organization_id = $2', [newCamp.id, 'org_cmc_realty']);
