@@ -585,7 +585,8 @@ export const MIGRATIONS: Migration[] = [
         final_summary TEXT,
         execution_time_ms INTEGER,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
-        completed_at TIMESTAMP WITH TIME ZONE
+        completed_at TIMESTAMP WITH TIME ZONE,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_workflow_runs_org_created
         ON workflow_runs(organization_id, created_at DESC);
