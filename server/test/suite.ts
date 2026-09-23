@@ -70,7 +70,9 @@ async function runAllTests() {
   if (pgPool) {
     await pgPool.query(`
       INSERT INTO organizations (id, name, slug)
-      VALUES ('org_cmc_realty', 'CMC Realty Test Organization', 'cmc-realty-test')
+      VALUES
+        ('org_cmc_realty', 'CMC Realty Test Organization', 'cmc-realty-test'),
+        ('org_test', 'Vortex One Integration Test Organization', 'vortex-one-integration-test')
       ON CONFLICT (id) DO NOTHING
     `);
     await pgPool.query(`
