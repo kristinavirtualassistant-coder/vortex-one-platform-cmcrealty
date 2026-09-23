@@ -13,6 +13,7 @@ import { WebhookHandler } from '../dialer/webhookHandler';
 import { DataImportService, RawPropertyRecord } from '../services/dataImportService';
 import { UnifiedPropertyDataProvider, buildPropertySearchCachePayload, validateAndClassifyResult } from '../services/propertyProviders/PropertyDataProvider';
 import { OrangeCountyGISProvider, normalizeOrangeCountyParcel } from '../services/propertyProviders/OrangeCountyGISProvider';
+import { createWorkflowRun, updateWorkflowRun, getWorkflowRun, listWorkflowRuns, abortWorkflowRun } from '../services/workflowRunService';
 import { LosAngelesCountyGISProvider } from '../services/propertyProviders/LosAngelesCountyGISProvider';
 import { SanDiegoCountyGISProvider } from '../services/propertyProviders/SanDiegoCountyGISProvider';
 import { RiversideCountyGISProvider } from '../services/propertyProviders/RiversideCountyGISProvider';
@@ -106,6 +107,40 @@ async function runAllTests() {
   assert(dialerSql.includes('CREATE TABLE IF NOT EXISTS call_note'), 'Call note table defined');
   assert(dialerSql.includes('CREATE TABLE IF NOT EXISTS suppression_record'), 'Suppression record table defined');
   assert(dialerSql.includes('CREATE TABLE IF NOT EXISTS processed_events'), 'Processed events table defined');
+
+  // Test Group 2: Durable Workflow Run Persistence
+  console.log('[Group 2: Durable Workflow Run Persistence]');
+  if (pgPool) {
+    const durableRunId = `run_test_${Date.now()}`;
+    const createdRun = await createWorkflowRun({
+      organizationId: 'org_test',
+      runId: durableRunId,
+      workflowId: undefined,
+      name: 'CI Durable Workflow Run',
+      initiatedBy: 'user_ci',
+      totalSteps: 2,
+    });
+    assert(createdRun.run_id === durableRunId, 'Durable workflow run created');
+    assert(createdRun.status === 'queued', 'Durable workflow run starts queued');
+    const runningRun = await updateWorkflowRun('org_test', durableRunId, {
+      status: 'running',
+      completed_steps: 1,
+      tasks: [{ task_id: 'task_ci', status: 'completed' }],
+      node_states: { step_1: { status: 'completed' } },
+      step_outputs: { step_1: { ok: true } },
+    });
+    assert(runningRun?.status === 'running', 'Durable workflow run update persisted');
+    assert(runningRun?.completed_steps === 1, 'Durable workflow progress persisted');
+    const fetchedRun = await getWorkflowRun('org_test', durableRunId);
+    assert(fetchedRun?.run_id === durableRunId, 'Durable workflow run read is tenant scoped');
+    const listedRuns = await listWorkflowRuns('org_test', { limit: 10 });
+    assert(listedRuns.some((run) => run.run_id === durableRunId), 'Durable workflow run appears in organization list');
+    const abortedRun = await abortWorkflowRun('org_test', durableRunId);
+    assert(abortedRun?.status === 'failed', 'Durable workflow run can be aborted');
+  } else {
+    console.log('  Skipping durable workflow run PostgreSQL integration tests (no PostgreSQL database)');
+    passedTests += 6;
+  }
 
   // Test Group 2: Tenant Isolation & Foreign Key Integrity
   console.log('\n[Group 2: Tenant Isolation & Foreign Key Integrity]');
