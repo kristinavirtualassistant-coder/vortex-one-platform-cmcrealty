@@ -757,7 +757,7 @@ async function startServer() {
         workflow_id: workflow_id || 'custom_chain',
         name: matchedWf?.name || `Custom Stream Execution (${stepsToRun.length} steps)`,
         status: 'running',
-        initiated_by: 'Visual Workflow Builder Live Stream',
+        initiated_by: (req as AuthRequest).dbUser?.id || 'system',
         created_at: new Date().toISOString(),
         total_steps: stepsToRun.length,
         completed_steps: 0,
@@ -772,6 +772,20 @@ async function startServer() {
             status: 'idle',
           };
         }
+      });
+      await createWorkflowRun({
+        organizationId: orgId,
+        runId,
+        workflowId: workflow_id,
+        name: workflowRun.name,
+        initiatedBy: workflowRun.initiated_by,
+        totalSteps: stepsToRun.length,
+        status: 'running',
+      });
+      await updateWorkflowRun(orgId, runId, {
+        node_states: workflowRun.node_states,
+        tasks: workflowRun.tasks,
+        step_outputs: workflowRun.step_outputs,
       });
 
       const runStartTime = Date.now();
@@ -799,6 +813,14 @@ async function startServer() {
             startedAt: new Date().toISOString(),
           };
         }
+        await updateWorkflowRun(orgId, runId, {
+          current_step_id: workflowRun.current_step_id,
+          current_step_name: workflowRun.current_step_name,
+          current_agent_id: workflowRun.current_agent_id,
+          node_states: workflowRun.node_states,
+          tasks: workflowRun.tasks,
+          completed_steps: workflowRun.completed_steps,
+        });
 
         // 1. Emit step_start (Node turns Blue / Active)
         sendEvent('step_start', {
@@ -840,6 +862,7 @@ async function startServer() {
           objective: task.objective, priority: task.priority, taskInput: task.input, dependencies: task.dependencies,
         });
         workflowRun.tasks = [...executedTasks];
+        await updateWorkflowRun(orgId, runId, { tasks: workflowRun.tasks, node_states: workflowRun.node_states });
 
         try {
           // Execute sub-agent for this step
@@ -869,6 +892,13 @@ async function startServer() {
               completedAt: task.completed_at,
             };
           }
+          await updateWorkflowRun(orgId, runId, {
+            status: 'running',
+            completed_steps: workflowRun.completed_steps,
+            tasks: workflowRun.tasks,
+            node_states: workflowRun.node_states,
+            step_outputs: workflowRun.step_outputs,
+          });
 
           // Check if step requires human approval gate
           let approvalReq = null;
@@ -951,6 +981,12 @@ async function startServer() {
             };
           }
           workflowRun.status = 'failed';
+          await updateWorkflowRun(orgId, runId, {
+            status: 'failed',
+            tasks: workflowRun.tasks,
+            node_states: workflowRun.node_states,
+            completed_steps: workflowRun.completed_steps,
+          });
 
           // Emit step_failed (Node turns Red / Failed)
           sendEvent('step_failed', {
@@ -988,6 +1024,16 @@ async function startServer() {
       workflowRun.completed_at = new Date().toISOString();
       workflowRun.execution_time_ms = Date.now() - runStartTime;
       workflowRun.final_summary = `Completed ${workflowRun.completed_steps}/${stepsToRun.length} steps in ${workflowRun.execution_time_ms}ms`;
+      await updateWorkflowRun(orgId, runId, {
+        status: workflowRun.status,
+        completed_steps: workflowRun.completed_steps,
+        tasks: workflowRun.tasks,
+        node_states: workflowRun.node_states,
+        step_outputs: workflowRun.step_outputs,
+        final_summary: workflowRun.final_summary,
+        execution_time_ms: workflowRun.execution_time_ms,
+        completed_at: workflowRun.completed_at,
+      });
 
       // 3. Emit workflow_completed
       sendEvent('workflow_completed', {
