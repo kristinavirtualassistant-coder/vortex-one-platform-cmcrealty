@@ -611,6 +611,14 @@ async function startServer() {
             if (workflowRun.node_states) {
               workflowRun.node_states[stepKey].status = 'approval_required';
             }
+            workflowRun.status = 'paused_approval';
+            await updateWorkflowRun(orgId, runId, {
+              status: 'paused_approval',
+              tasks: workflowRun.tasks,
+              node_states: workflowRun.node_states,
+              completed_steps: workflowRun.completed_steps,
+            });
+            break;
           }
 
           // Persist audit entry in PostgreSQL
@@ -686,7 +694,9 @@ async function startServer() {
         await updateTaskResult(pool, orgId, executedTask);
       }
 
-      workflowRun.status = executedTasks.every((t) => t.status === 'completed') ? 'completed' : 'failed';
+      if (workflowRun.status !== 'paused_approval') {
+        workflowRun.status = executedTasks.every((t) => t.status === 'completed') ? 'completed' : 'failed';
+      }
       workflowRun.completed_at = new Date().toISOString();
       workflowRun.execution_time_ms = Date.now() - runStartTime;
       workflowRun.final_summary = `Completed ${workflowRun.completed_steps}/${stepsToRun.length} steps in ${workflowRun.execution_time_ms}ms`;
@@ -924,6 +934,13 @@ async function startServer() {
             if (workflowRun.node_states) {
               workflowRun.node_states[stepKey].status = 'approval_required';
             }
+            workflowRun.status = 'paused_approval';
+            await updateWorkflowRun(orgId, runId, {
+              status: 'paused_approval',
+              tasks: workflowRun.tasks,
+              node_states: workflowRun.node_states,
+              completed_steps: workflowRun.completed_steps,
+            });
 
             sendEvent('step_approval_required', {
               step_id: step.step_id || `step_${i}`,
@@ -933,6 +950,7 @@ async function startServer() {
               status: 'approval_required',
               description: approvalReq.description,
             });
+            break;
           }
 
           // 2. Emit step_completed (Node turns Green / Completed)
