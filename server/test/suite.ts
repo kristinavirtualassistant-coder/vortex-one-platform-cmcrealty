@@ -79,9 +79,9 @@ async function runAllTests() {
     `);
     await pgPool.query(`
       INSERT INTO call (id, organization_id, telephony_call_id, contact_name, phone_number, status)
-      VALUES ('call_fixture_501', 'org_cmc_realty', 'call_501', 'CI Webhook Fixture', '(949) 555-0101', 'disconnected')
+      VALUES ('call_fixture_501', 'org_cmc_realty', 'call_501', 'CI Webhook Fixture', '(949) 555-0101', 'connected')
       ON CONFLICT (id) DO UPDATE
-        SET telephony_call_id = EXCLUDED.telephony_call_id, status = 'disconnected'
+        SET telephony_call_id = EXCLUDED.telephony_call_id, status = 'connected'
     `);
   }
 
