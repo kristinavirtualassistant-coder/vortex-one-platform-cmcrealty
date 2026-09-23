@@ -125,7 +125,11 @@ async function runAllTests() {
     const runningRun = await updateWorkflowRun('org_test', durableRunId, {
       status: 'running',
       completed_steps: 1,
-      tasks: [{ task_id: 'task_ci', status: 'completed' }],
+      tasks: [{
+        task_id: 'task_ci', parent_task_id: null, assigned_agent: 'sub_agent_1', objective: 'CI task',
+        input: {}, dependencies: [], priority: 'medium', status: 'completed', confidence: 1,
+        created_at: new Date().toISOString(), completed_at: new Date().toISOString(),
+      }],
       node_states: { step_1: { status: 'completed' } },
       step_outputs: { step_1: { ok: true } },
     });
