@@ -4,6 +4,8 @@
  * PostgreSQL is the sole persistence layer for endpoint and delivery state.
  */
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { lookup } from 'node:dns/promises';
+import { BlockList, isIP } from 'node:net';
 import { getPgPool } from '../db/db';
 
 export type ExternalWebhookEventType = 'property.discovered' | 'lead.enriched';
@@ -106,9 +108,71 @@ function deliveryFromRow(row: any): ExternalWebhookDelivery {
 export function isSupportedWebhookUrl(value: string): boolean {
   try {
     const url = new URL(value);
-    return url.protocol === 'https:' || url.protocol === 'http:';
+    return (url.protocol === 'https:' || url.protocol === 'http:') && Boolean(url.hostname);
   } catch {
     return false;
+  }
+}
+
+const SSRF_BLOCKLIST = new BlockList();
+for (const [network, prefix, family] of [
+  ['0.0.0.0', 8, 'ipv4'],
+  ['10.0.0.0', 8, 'ipv4'],
+  ['100.64.0.0', 10, 'ipv4'],
+  ['127.0.0.0', 8, 'ipv4'],
+  ['169.254.0.0', 16, 'ipv4'],
+  ['172.16.0.0', 12, 'ipv4'],
+  ['192.0.0.0', 24, 'ipv4'],
+  ['192.168.0.0', 16, 'ipv4'],
+  ['198.18.0.0', 15, 'ipv4'],
+  ['198.51.100.0', 24, 'ipv4'],
+  ['203.0.113.0', 24, 'ipv4'],
+  ['224.0.0.0', 4, 'ipv4'],
+  ['240.0.0.0', 4, 'ipv4'],
+  ['::', 128, 'ipv6'],
+  ['::1', 128, 'ipv6'],
+  ['fc00::', 7, 'ipv6'],
+  ['fe80::', 10, 'ipv6'],
+  ['ff00::', 8, 'ipv6'],
+  ['2001:db8::', 32, 'ipv6'],
+] as const) {
+  SSRF_BLOCKLIST.addSubnet(network, prefix, family);
+}
+
+function isBlockedAddress(address: string, family: 4 | 6): boolean {
+  return SSRF_BLOCKLIST.check(address, family === 4 ? 'ipv4' : 'ipv6');
+}
+
+export async function assertSafeWebhookUrl(value: string): Promise<void> {
+  if (!isSupportedWebhookUrl(value)) {
+    throw new Error('Webhook URL must use http:// or https://.');
+  }
+  const url = new URL(value);
+  if (url.username || url.password) throw new Error('Webhook URL must not contain embedded credentials.');
+  if (url.port && !['80', '443'].includes(url.port)) {
+    throw new Error('Webhook URL must use port 80 or 443.');
+  }
+
+  const hostname = url.hostname.replace(/^\[|\]$/g, '');
+  const literalFamily = isIP(hostname);
+  if (literalFamily) {
+    if (isBlockedAddress(hostname, literalFamily as 4 | 6)) {
+      throw new Error('Webhook URL resolves to a private, local, link-local, multicast, or reserved address.');
+    }
+    return;
+  }
+
+  let addresses: Array<{ address: string; family: 4 | 6 }>;
+  try {
+    addresses = (await lookup(hostname, { all: true, verbatim: true })).map((entry) => ({
+      address: entry.address,
+      family: entry.family as 4 | 6,
+    }));
+  } catch {
+    throw new Error('Webhook hostname could not be resolved.');
+  }
+  if (addresses.length === 0 || addresses.some((entry) => isBlockedAddress(entry.address, entry.family))) {
+    throw new Error('Webhook hostname resolves to a private, local, link-local, multicast, or reserved address.');
   }
 }
 
@@ -162,7 +226,7 @@ export class ExternalWebhookService {
     enabled?: boolean;
     description?: string;
   }): Promise<ExternalWebhookEndpoint> {
-    this.validateEndpointInput(input.url, input.events);
+    await this.validateEndpointInput(input.url, input.events);
     const now = new Date().toISOString();
     const endpoint: ExternalWebhookEndpoint = {
       id: `wh_${randomUUID()}`,
@@ -196,7 +260,7 @@ export class ExternalWebhookService {
     if (!existing) return null;
     const nextUrl = patch.url ?? existing.url;
     const nextEvents = patch.events ?? existing.events;
-    this.validateEndpointInput(nextUrl, nextEvents);
+    await this.validateEndpointInput(nextUrl, nextEvents);
     const nextSecret = patch.rotateSecret ? randomBytes(32).toString('hex') : existing.secret;
     const now = new Date().toISOString();
     const { rows } = await requirePool().query(
@@ -296,6 +360,7 @@ export class ExternalWebhookService {
   }
 
   private async deliver(endpoint: ExternalWebhookEndpoint, event: ExternalWebhookEvent, persist = true): Promise<ExternalWebhookDelivery> {
+    await assertSafeWebhookUrl(endpoint.url);
     const body = JSON.stringify(event);
     const timestamp = event.occurredAt;
     const signature = buildWebhookSignature(endpoint.secret || '', timestamp, body);
@@ -375,8 +440,8 @@ export class ExternalWebhookService {
     }
   }
 
-  private validateEndpointInput(url: string, events: ExternalWebhookEventType[]) {
-    if (!isSupportedWebhookUrl(url)) throw new Error('Webhook URL must use http:// or https://.');
+  private async validateEndpointInput(url: string, events: ExternalWebhookEventType[]) {
+    await assertSafeWebhookUrl(url);
     if (!Array.isArray(events) || events.length === 0) throw new Error('At least one webhook event is required.');
     const allowed = new Set<ExternalWebhookEventType>(['property.discovered', 'lead.enriched']);
     if (events.some((event) => !allowed.has(event))) throw new Error('Unsupported webhook event type.');
