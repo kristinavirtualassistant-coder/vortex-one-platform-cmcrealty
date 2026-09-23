@@ -695,7 +695,11 @@ async function startServer() {
       }
 
       if (workflowRun.status !== 'paused_approval') {
-        workflowRun.status = executedTasks.every((t) => t.status === 'completed') ? 'completed' : 'failed';
+        if (workflowRun.status !== 'paused_approval') {
+        if (workflowRun.status !== 'paused_approval') {
+          workflowRun.status = executedTasks.every((t) => t.status === 'completed') ? 'completed' : 'failed';
+        }
+      }
       }
       workflowRun.completed_at = new Date().toISOString();
       workflowRun.execution_time_ms = Date.now() - runStartTime;
@@ -1038,7 +1042,11 @@ async function startServer() {
         await updateTaskResult(pool, orgId, executedTask);
       }
 
-      workflowRun.status = executedTasks.every((t) => t.status === 'completed') ? 'completed' : 'failed';
+      if (workflowRun.status !== 'paused_approval') {
+        if (workflowRun.status !== 'paused_approval') {
+          workflowRun.status = executedTasks.every((t) => t.status === 'completed') ? 'completed' : 'failed';
+        }
+      }
       workflowRun.completed_at = new Date().toISOString();
       workflowRun.execution_time_ms = Date.now() - runStartTime;
       workflowRun.final_summary = `Completed ${workflowRun.completed_steps}/${stepsToRun.length} steps in ${workflowRun.execution_time_ms}ms`;
