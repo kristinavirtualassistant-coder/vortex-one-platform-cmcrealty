@@ -79,9 +79,9 @@ async function runAllTests() {
     `);
     await pgPool.query(`
       INSERT INTO call (id, organization_id, telephony_call_id, contact_name, phone_number, status)
-      VALUES ('call_fixture_501', 'org_cmc_realty', 'call_501', 'CI Webhook Fixture', '(949) 555-0101', 'connected')
+      VALUES ('call_fixture_501', 'org_cmc_realty', 'call_501', 'CI Webhook Fixture', '(949) 555-0101', 'disconnected')
       ON CONFLICT (id) DO UPDATE
-        SET telephony_call_id = EXCLUDED.telephony_call_id, status = 'connected'
+        SET telephony_call_id = EXCLUDED.telephony_call_id, status = 'disconnected'
     `);
   }
 
@@ -269,6 +269,8 @@ async function runAllTests() {
     const startRes = await CampaignManager.startCampaign('org_cmc_realty', newCamp.id, 'agent_lead');
     assert(startRes.session.status === 'active', 'Dialing session started for campaign');
 
+    await getPgPool()!.query(`UPDATE campaign SET calling_hours_start = '00:00', calling_hours_end = '23:59' WHERE id = $1 AND organization_id = $2`, [newCamp.id, 'org_cmc_realty']);
+
     await CampaignManager.addContacts('org_cmc_realty', newCamp.id, [
       { contactName: 'Arthur Pendelton', phoneNumber: '(949) 555-7788', priority: 2 },
       { contactName: 'DNC Blocked Prospect', phoneNumber: '(949) 555-9999', priority: 3 },
@@ -283,10 +285,12 @@ async function runAllTests() {
     assert(['dialed', 'suppressed'].includes(dialBlocked.status), 'Dialer successfully processed contact with compliance check');
 
     await CampaignManager.pauseCampaign('org_cmc_realty', newCamp.id);
-    assert(inMemoryStore.campaigns.find(c => c.id === newCamp.id)?.status === 'paused', 'Campaign paused successfully');
+    const pausedCampaign = await getPgPool()!.query('SELECT status FROM campaign WHERE id = $1 AND organization_id = $2', [newCamp.id, 'org_cmc_realty']);
+    assert(pausedCampaign.rows[0]?.status === 'paused', 'Campaign paused successfully');
 
     await CampaignManager.stopCampaign('org_cmc_realty', newCamp.id);
-    assert(inMemoryStore.campaigns.find(c => c.id === newCamp.id)?.status === 'completed', 'Campaign stopped/completed successfully');
+    const stoppedCampaign = await getPgPool()!.query('SELECT status FROM campaign WHERE id = $1 AND organization_id = $2', [newCamp.id, 'org_cmc_realty']);
+    assert(stoppedCampaign.rows[0]?.status === 'completed', 'Campaign stopped/completed successfully');
 
   }
 
