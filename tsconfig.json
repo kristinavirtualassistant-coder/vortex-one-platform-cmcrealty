@@ -25,9 +25,10 @@
       ]
     },
     "allowImportingTsExtensions": true,
-    "noEmit": true,
-    "exclude": [
-      "deploy/cloudflare-app/**/*.ts"
-    ]
+    "noEmit": true
+  },
+  "exclude": [
+    "deploy/cloudflare-app/**/*.ts"
+  ]
   }
 }
