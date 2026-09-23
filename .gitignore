@@ -1,0 +1,16 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Local/generated runtime data
+server/data/
+
+# Local RingCentral credential files
+ringcentral-credentials.json
+test-cmc-dialer-jwt.mjs
+test-ringcentral-jwt.cjs
