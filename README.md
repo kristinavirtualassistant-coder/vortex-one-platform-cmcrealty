@@ -49,11 +49,41 @@ npm ci && npm run build
 
 and publishes `dist`. Browser API requests under `/api/*` are proxied to the production Cloudflare Worker endpoint.
 
+The controlled production workflow is `.github/workflows/netlify-deploy.yml`. It is manual-only and requires these GitHub environment secrets in the `production` environment:
+
+- `NETLIFY_AUTH_TOKEN`
+- `NETLIFY_SITE_ID`
+
+The workflow builds, lints, and deploys `dist` with the pinned Netlify CLI version.
+
 ### Cloudflare backend
 
-The Cloudflare deployment configuration is under `deploy/cloudflare-app/`. The deployment workflow is manual and requires GitHub environment secrets for the Cloudflare API token and account ID.
+The Cloudflare deployment configuration is under `deploy/cloudflare-app/`. The deployment workflow is manual-only and requires these GitHub environment secrets in the `production` environment:
+
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
 
 The PostgreSQL password is intentionally kept as a Cloudflare secret rather than committed to source control.
+
+The Worker configuration uses the public endpoint:
+
+`https://vortex-one.workers.dev`
+
+After the first successful deployment, verify:
+
+```
+curl -i https://vortex-one.workers.dev/
+curl -i https://vortex-one.workers.dev/api/health
+```
+
+### Production sequence
+
+1. Configure the required GitHub `production` environment secrets.
+2. Run `Vortex One Cloudflare Deployment` manually.
+3. Verify the Worker hostname and `/api/health`.
+4. Run `Vortex One Netlify Deployment` manually.
+5. Verify `https://vortexone-cmc.netlify.app/` and authenticated API flows through `/api/*`.
+6. Only then approve and merge PR #1 into `main`.
 
 ## Security
 
@@ -63,4 +93,4 @@ External webhook delivery includes URL validation, SSRF address blocking, signed
 
 ## Approval boundary
 
-The `production-readiness` branch is the release candidate. The `main` branch is not changed automatically. Merge and production approval remain manual.
+The `production-readiness` branch is the release candidate. The `main` branch is not changed automatically. Merge remains manual. Production deployments are also manual and secret-gated.
