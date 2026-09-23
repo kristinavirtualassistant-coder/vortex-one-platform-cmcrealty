@@ -10,8 +10,7 @@
       "DOM.Iterable"
     ],
     "types": [
-      "vite/client",
-      "@cloudflare/workers-types"
+      "vite/client"
     ],
     "skipLibCheck": true,
     "moduleResolution": "bundler",
@@ -26,6 +25,9 @@
       ]
     },
     "allowImportingTsExtensions": true,
-    "noEmit": true
+    "noEmit": true,
+    "exclude": [
+      "deploy/cloudflare-app/**/*.ts"
+    ]
   }
 }
