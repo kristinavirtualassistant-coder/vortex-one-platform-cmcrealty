@@ -9,7 +9,6 @@ const mutationLines = source
 
 const explicitlyUnprotected = new Set([
   "app.post('/internal/scheduler/property-refresh'",
-  "app.post('/api/runs/:id/abort'",
   "app.post('/api/property-search'",
   "app.post('/api/telephony/webhook/:provider'",
   "app.post('/api/tts'",
