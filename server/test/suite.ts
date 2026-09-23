@@ -465,11 +465,11 @@ async function runAllTests() {
 
     // Tenant B isolation test with an explicitly supplied authoritative batch.
     const tenantBResult = await DataImportService.reconcileBatch('org_tenant_b', testBatch);
-    const tenantBProps = inMemoryStore.properties.filter((p) => p.organization_id === 'org_tenant_b');
-    const tenantAProps = inMemoryStore.properties.filter((p) => p.organization_id === TEST_ORG_ID);
-    assert(tenantBProps.length > 0 && tenantAProps.length > 0, 'Both tenant partitions populated independently');
+    const tenantBProps = await pgPool!.query('SELECT organization_id FROM properties WHERE organization_id = $1', ['org_tenant_b']);
+    const tenantAProps = await pgPool!.query('SELECT organization_id FROM properties WHERE organization_id = $1', [TEST_ORG_ID]);
+    assert(tenantBProps.rows.length > 0 && tenantAProps.rows.length > 0, 'Both tenant partitions populated independently');
     assert(
-      tenantBProps.every((p) => p.organization_id === 'org_tenant_b'),
+      tenantBProps.rows.every((p: { organization_id: string }) => p.organization_id === 'org_tenant_b'),
       'Tenant B properties strictly partitioned'
     );
   }
