@@ -695,11 +695,7 @@ async function startServer() {
       }
 
       if (workflowRun.status !== 'paused_approval') {
-        if (workflowRun.status !== 'paused_approval') {
-        if (workflowRun.status !== 'paused_approval') {
-          workflowRun.status = executedTasks.every((t) => t.status === 'completed') ? 'completed' : 'failed';
-        }
-      }
+        workflowRun.status = executedTasks.every((t) => t.status === 'completed') ? 'completed' : 'failed';
       }
       workflowRun.completed_at = new Date().toISOString();
       workflowRun.execution_time_ms = Date.now() - runStartTime;
@@ -1043,9 +1039,7 @@ async function startServer() {
       }
 
       if (workflowRun.status !== 'paused_approval') {
-        if (workflowRun.status !== 'paused_approval') {
-          workflowRun.status = executedTasks.every((t) => t.status === 'completed') ? 'completed' : 'failed';
-        }
+        workflowRun.status = executedTasks.every((t) => t.status === 'completed') ? 'completed' : 'failed';
       }
       workflowRun.completed_at = new Date().toISOString();
       workflowRun.execution_time_ms = Date.now() - runStartTime;
