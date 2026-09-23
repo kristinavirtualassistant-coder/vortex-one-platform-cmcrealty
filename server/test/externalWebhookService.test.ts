@@ -10,7 +10,7 @@ import {
 } from '../services/externalWebhookService';
 
 function testUrlValidation() {
-  assert.equal(isSupportedWebhookUrl('https://dialer.example.com/webhook'), true);
+  assert.equal(isSupportedWebhookUrl('https://1.1.1.1/webhook'), true);
   assert.equal(isSupportedWebhookUrl('http://localhost:8080/hook'), true);
   assert.equal(isSupportedWebhookUrl('ftp://example.com/hook'), false);
   assert.equal(isSupportedWebhookUrl('javascript:alert(1)'), false);
@@ -54,7 +54,7 @@ async function testDeliveryHeaders() {
 
   await service.deliverForTest({
     endpointId: 'wh_headers',
-    url: 'https://dialer.example.com/webhook',
+    url: 'https://1.1.1.1/webhook',
     secret: 'test-secret',
     organizationId: 'org_test',
     eventType: 'property.discovered',
@@ -90,7 +90,7 @@ async function testRetryPolicy() {
 
   const result = await service.deliverForTest({
     endpointId: 'wh_test',
-    url: 'https://dialer.example.com/webhook',
+    url: 'https://1.1.1.1/webhook',
     secret: 'test-secret',
     organizationId: 'org_test',
     eventType: 'lead.enriched',
@@ -103,7 +103,7 @@ async function testRetryPolicy() {
 
   const failed = await noRetryService.deliverForTest({
     endpointId: 'wh_test',
-    url: 'https://dialer.example.com/webhook',
+    url: 'https://1.1.1.1/webhook',
     secret: 'test-secret',
     organizationId: 'org_test',
     eventType: 'lead.enriched',
