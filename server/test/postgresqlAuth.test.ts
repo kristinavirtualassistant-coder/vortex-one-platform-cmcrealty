@@ -9,7 +9,7 @@ import {
 
 describe('PostgreSQL authentication primitives', () => {
   it('hashes passwords without storing the plaintext', async () => {
-    const password = 'Correct-Horse-Battery-Staple-2026!';
+    const password = 'TestOnly-Passphrase-2026!';
     const encoded = await hashPassword(password);
 
     assert.notEqual(encoded, password);
