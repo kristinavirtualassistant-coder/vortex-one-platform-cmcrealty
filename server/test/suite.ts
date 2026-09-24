@@ -269,7 +269,7 @@ async function runAllTests() {
     const startRes = await CampaignManager.startCampaign('org_cmc_realty', newCamp.id, 'agent_lead');
     assert(startRes.session.status === 'active', 'Dialing session started for campaign');
 
-    await getPgPool()!.query(`UPDATE campaign SET calling_hours_start = '00:00', calling_hours_end = '23:59' WHERE id = $1 AND organization_id = $2`, [newCamp.id, 'org_cmc_realty']);
+    await getPgPool()!.query(`UPDATE campaign SET calling_hours_start = '00:00:00', calling_hours_end = '23:59:59', timezone = 'UTC' WHERE id = $1 AND organization_id = $2`, [newCamp.id, 'org_cmc_realty']);
 
     await CampaignManager.addContacts('org_cmc_realty', newCamp.id, [
       { contactName: 'Arthur Pendelton', phoneNumber: '(949) 555-7788', priority: 2 },
