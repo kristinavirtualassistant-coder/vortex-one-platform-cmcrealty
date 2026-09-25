@@ -1,30 +1,27 @@
-import { Container, getContainer } from '@cloudflare/containers';
-import { env } from 'cloudflare:workers';
-
-type ContainerRuntimeEnv = { SQL_HOST: string; SQL_PORT: string; SQL_DB_NAME: string; SQL_USER: string; SQL_PASSWORD: string; SQL_SSL: string; VORTEX_ONE_SKIP_MIGRATIONS: string; };
-
-export class VortexOneContainer extends Container {
-  defaultPort = 8080;
-  sleepAfter = '10m';
-  enableInternet = true;
-  envVars = {
-    SQL_HOST: (env as unknown as ContainerRuntimeEnv).SQL_HOST,
-    SQL_PORT: (env as unknown as ContainerRuntimeEnv).SQL_PORT,
-    SQL_DB_NAME: (env as unknown as ContainerRuntimeEnv).SQL_DB_NAME,
-    SQL_USER: (env as unknown as ContainerRuntimeEnv).SQL_USER,
-    SQL_PASSWORD: (env as unknown as ContainerRuntimeEnv).SQL_PASSWORD,
-    SQL_SSL: (env as unknown as ContainerRuntimeEnv).SQL_SSL,
-    VORTEX_ONE_SKIP_MIGRATIONS: (env as unknown as ContainerRuntimeEnv).VORTEX_ONE_SKIP_MIGRATIONS,
-  };
+interface Env {
+  ASSETS: Fetcher;
+  BACKEND_ORIGIN: string;
 }
 
-type Env = {
-  VORTEX_ONE_CONTAINER: any;
-};
+function isBackendRoute(pathname: string): boolean {
+  return pathname.startsWith('/api/') || pathname === '/api' || pathname.startsWith('/internal/');
+}
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const container = getContainer(env.VORTEX_ONE_CONTAINER, 'vortex-one-production');
-    return container.fetch(request);
+    const url = new URL(request.url);
+
+    if (isBackendRoute(url.pathname)) {
+      const backend = new URL(env.BACKEND_ORIGIN);
+      backend.pathname = url.pathname;
+      backend.search = url.search;
+
+      const proxyRequest = new Request(backend.toString(), request);
+      proxyRequest.headers.set('x-vortex-one-proxy', 'cloudflare-worker');
+
+      return fetch(proxyRequest);
+    }
+
+    return env.ASSETS.fetch(request);
   },
 };

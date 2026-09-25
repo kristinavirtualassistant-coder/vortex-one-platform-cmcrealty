@@ -6,19 +6,16 @@
 
 ## 1. Architecture
 
-Vortex One is a full-stack TypeScript application with a React/Vite browser client, an Express API, PostgreSQL as the authoritative production database, and Cloudflare Containers as the portable production API/runtime target. Netlify serves the web frontend and proxies `/api/*` to the Cloudflare Worker.
+Vortex One is a full-stack TypeScript application with a React/Vite browser client, an Express API, PostgreSQL as the authoritative production database, and a Node/Express production API with Supabase PostgreSQL. Cloudflare Workers Static Assets serves the web frontend and proxies `/api/*` to the free Render backend. Netlify remains an optional legacy deployment target.
 
 ```text
 Browser
   │
   ▼
-Netlify — React/Vite static frontend
+Cloudflare Worker + Static Assets — React/Vite frontend
   │ /api/*
   ▼
-Cloudflare Worker
-  │
-  ▼
-Cloudflare Container — Node 22 / Express
+Render Free Web Service — Node 22 / Express API
   │
   ▼
 Supabase PostgreSQL — authoritative production state
@@ -192,38 +189,28 @@ OAuth flow is implemented in `server/services/integrationOAuth.ts`. Integration 
 
 ## 10. Deployment
 
-### Netlify frontend
-
-- Site: `vortexone-cmc`
-- Site URL: `https://vortexone-cmc.netlify.app/`
-- Build: `npm ci && npm run build`
-- Publish directory: `dist`
-- Node: 22
-- `/api/*` is configured to proxy to `https://vortex-one.workers.dev/api/:splat`
-- SPA fallback routes all remaining paths to `/index.html`
-- Production deployment workflow: `.github/workflows/netlify-deploy.yml`
-
-### Cloudflare
+### Cloudflare frontend + API proxy
 
 - Worker name: `vortex-one`
 - Worker target: `https://vortex-one.workers.dev`
-- Runtime: Cloudflare Workers + Cloudflare Containers
-- Container base: Node 22 Bookworm Slim
-- Container port: 8080
-- Node compatibility enabled
-- Observability enabled
-- Durable Object binding: `VORTEX_ONE_CONTAINER`
-- Required secret: `SQL_PASSWORD`
-- Account credentials are supplied through GitHub Actions secrets, not source control
+- Workers Static Assets serves `dist/` directly.
+- `/api/*` and `/internal/*` are proxied to the Render API service.
+- SPA fallback is handled by Workers Static Assets.
+- Static asset delivery uses Cloudflare's free static-assets path.
+- Account credentials are supplied through GitHub Actions secrets, not source control.
 
 Cloudflare deployment workflow:
 `.github/workflows/cloudflare-deploy.yml`
 
-### Container
+### Render API
 
-`Dockerfile` uses a two-stage build:
-1. Node 22 build image installs dependencies and runs the Vite/esbuild production build.
-2. Node 22 runtime image installs production dependencies and starts `dist/server.cjs` on port 8080.
+- Service: `vortex-one-api`
+- Runtime: Node 22 / Express
+- Compute plan: Free
+- Health check: `/api/health`
+- Deployment definition: `render.yaml`
+- PostgreSQL: existing Supabase production database
+- Free service instances can spin down after inactivity, so the first request after idle may have startup latency.
 
 ## 11. CI/CD and quality
 
@@ -346,8 +333,9 @@ This is an external account/billing/platform restriction. It does not indicate a
 ## 18. Canonical URLs
 
 - Repository: `https://github.com/kristinavirtualassistant-coder/vortex-one-platform-cmcrealty`
-- Frontend: `https://vortexone-cmc.netlify.app/`
-- Intended API Worker: `https://vortex-one.workers.dev`
+- Frontend/API edge: `https://vortex-one.workers.dev`
+- Render backend: `https://vortex-one-api.onrender.com`
+- Legacy Netlify frontend: `https://vortexone-cmc.netlify.app/`
 
 ## 19. Completion definition
 
@@ -362,9 +350,9 @@ Vortex One should be considered technically complete only when all of the follow
 - tenant isolation and RBAC tests pass
 - dialer/call state and suppression tests pass
 - webhook security tests pass
-- Cloudflare Worker/container deployment succeeds
+- Cloudflare Worker + Static Assets deployment succeeds
+- Render API deployment succeeds
 - PostgreSQL production connection succeeds
-- Netlify production deployment succeeds
 - `/api/health` and `/api/ready` return healthy/ready states in production
 - frontend can authenticate and reach the production API
 - a real end-to-end workflow, CRM lead operation, property search, and dialer operation can be verified against production dependencies
