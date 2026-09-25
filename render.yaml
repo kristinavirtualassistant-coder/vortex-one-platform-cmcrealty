@@ -1,0 +1,44 @@
+services:
+  - type: web
+    name: vortex-one-api
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      - key: SQL_HOST
+        value: db.pkapasimwvbprpxhhboj.supabase.co
+      - key: SQL_PORT
+        value: "5432"
+      - key: SQL_DB_NAME
+        value: postgres
+      - key: SQL_USER
+        value: vortex_one_app
+      - key: SQL_SSL
+        value: "true"
+      - key: VORTEX_ONE_SKIP_MIGRATIONS
+        value: "true"
+      - key: APP_URL
+        value: https://vortex-one.workers.dev
+      - key: SQL_PASSWORD
+        sync: false
+      - key: AUTH_SESSION_PEPPER
+        sync: false
+      - key: INTEGRATION_ENCRYPTION_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: GOOGLE_INTEGRATION_CLIENT_ID
+        sync: false
+      - key: GOOGLE_INTEGRATION_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_INTEGRATION_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_INTEGRATION_CLIENT_SECRET
+        sync: false
